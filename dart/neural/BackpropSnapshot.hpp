@@ -723,6 +723,18 @@ public:
   std::vector<std::shared_ptr<DifferentiableContactConstraint>>
   getDifferentiableConstraints();
 
+  /// This returns the contact positions in world coords
+  Eigen::Matrix<s_t, Eigen::Dynamic, 3> getContactPositions();
+
+  /// This returns the contact normals in world coords
+  Eigen::Matrix<s_t, Eigen::Dynamic, 3> getContactNormals();
+
+  /// This returns the Jacobian of the contact positions wrt joint positions
+  Eigen::Matrix<s_t, Eigen::Dynamic, Eigen::Dynamic> getContactPositionJacobians(std::shared_ptr<simulation::World> world);
+
+  /// This returns the Jacobian of the contact normals wrt joint positions
+  Eigen::Matrix<s_t, Eigen::Dynamic, Eigen::Dynamic> getContactNormalJacobians(std::shared_ptr<simulation::World> world);
+
   /// This is the clamping constraints from all the constrained
   /// groups, concatenated together
   std::vector<std::shared_ptr<DifferentiableContactConstraint>>

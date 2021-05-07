@@ -50,6 +50,13 @@ void CollisionResult(py::module& m)
             return self->getNumContacts();
           })
       .def(
+          "getContact",
+          +[](dart::collision::CollisionResult* self,
+              std::size_t i)
+              -> const collision::Contact& {
+            return self->getContact(i);
+          })
+      .def(
           "inCollision",
           +[](const dart::collision::CollisionResult* self,
               const dart::dynamics::BodyNode* bn) -> bool {

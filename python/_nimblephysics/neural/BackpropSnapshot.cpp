@@ -67,6 +67,20 @@ void BackpropSnapshot(py::module& m)
           ::py::arg("perfLog") = nullptr,
           ::py::arg("exploreAlternateStrategies") = false)
       .def(
+          "getContactPositions",
+          &dart::neural::BackpropSnapshot::getContactPositions)
+      .def(
+          "getContactNormals",
+          &dart::neural::BackpropSnapshot::getContactNormals)
+      .def(
+          "getContactPositionJacobians",
+          &dart::neural::BackpropSnapshot::getContactPositionJacobians,
+          ::py::arg("world"))
+      .def(
+          "getContactNormalJacobians",
+          &dart::neural::BackpropSnapshot::getContactNormalJacobians,
+          ::py::arg("world"))
+      .def(
           "backpropState",
           &dart::neural::BackpropSnapshot::backpropState,
           ::py::arg("world"),

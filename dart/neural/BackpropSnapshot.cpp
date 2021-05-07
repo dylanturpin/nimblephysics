@@ -1728,10 +1728,7 @@ bool BackpropSnapshot::hasBounces()
 std::size_t BackpropSnapshot::getNumContacts()
 {
   std::size_t count = 0;
-  for (auto gradientMatrices : mGradientMatrices)
-  {
-    count += gradientMatrices->getDifferentiableConstraints().size();
-  }
+
   return count;
 }
 
@@ -1765,6 +1762,78 @@ BackpropSnapshot::getDifferentiableConstraints()
   assert(vec.size() == mNumConstraintDim);
   return vec;
 }
+
+Eigen::Matrix<s_t, Eigen::Dynamic, 3> BackpropSnapshot::getContactPositions()
+{
+  std::vector<std::shared_ptr<DifferentiableContactConstraint>>
+      originalConstraints = getDifferentiableConstraints();
+
+  // There are 3 constraints for each contact (with friction).
+  // They are ordered in groups of 3. We only care about the first in each group.
+  Eigen::Matrix<s_t, Eigen::Dynamic, 3> contactPositions = Eigen::Matrix<s_t, Eigen::Dynamic, 3>(originalConstraints.size() / 3, 3);
+  for (int k = 0; k < originalConstraints.size(); k += 3)
+  {
+    std::shared_ptr<DifferentiableContactConstraint> constraint
+        = originalConstraints[k];
+    contactPositions.row(k/3) = constraint->getContactWorldPosition();
+  }
+  return contactPositions;
+}
+
+Eigen::Matrix<s_t, Eigen::Dynamic, 3> BackpropSnapshot::getContactNormals()
+{
+  std::vector<std::shared_ptr<DifferentiableContactConstraint>>
+      originalConstraints = getDifferentiableConstraints();
+
+  // There are 3 constraints for each contact (with friction).
+  // They are ordered in groups of 3. We only care about the first in each group.
+  Eigen::Matrix<s_t, Eigen::Dynamic, 3> contactNormals = Eigen::Matrix<s_t, Eigen::Dynamic, 3>(originalConstraints.size() / 3, 3);
+  for (int k = 0; k < originalConstraints.size(); k += 3)
+  {
+    std::shared_ptr<DifferentiableContactConstraint> constraint
+        = originalConstraints[k];
+    contactNormals.row(k/3) = constraint->getContactWorldNormal();
+  }
+  return contactNormals;
+}
+
+Eigen::Matrix<s_t, Eigen::Dynamic, Eigen::Dynamic> BackpropSnapshot::getContactPositionJacobians(std::shared_ptr<simulation::World> world)
+{
+  std::vector<std::shared_ptr<DifferentiableContactConstraint>>
+      originalConstraints = getDifferentiableConstraints();
+
+  // There are 3 constraints for each contact (with friction).
+  // They are ordered in groups of 3. We only care about the first in each group.
+  Eigen::Matrix<s_t, Eigen::Dynamic, Eigen::Dynamic> contactPositionJacobians = Eigen::Matrix<s_t, Eigen::Dynamic, Eigen::Dynamic>(originalConstraints.size(), world->getNumDofs());
+  for (int k = 0; k < originalConstraints.size(); k += 3)
+  {
+    std::shared_ptr<DifferentiableContactConstraint> constraint
+        = originalConstraints[k];
+    // block of size 3 x numDofs starting at k, 0
+    contactPositionJacobians.block(k, 0, 3, world->getNumDofs()) = constraint->getContactPositionJacobian(world);
+  }
+  return contactPositionJacobians;
+}
+
+Eigen::Matrix<s_t, Eigen::Dynamic, Eigen::Dynamic> BackpropSnapshot::getContactNormalJacobians(std::shared_ptr<simulation::World> world)
+{
+  std::vector<std::shared_ptr<DifferentiableContactConstraint>>
+      originalConstraints = getDifferentiableConstraints();
+
+  // There are 3 constraints for each contact (with friction).
+  // They are ordered in groups of 3. We only care about the first in each group.
+  //Eigen::Matrix<s_t, Eigen::Dynamic, Eigen::Dynamic> contactPositionJacobians = Eigen::Matrix<s_t, Eigen::Dynamic, Eigen::Dynamic>();
+  Eigen::Matrix<s_t, Eigen::Dynamic, Eigen::Dynamic> contactNormalJacobians = Eigen::Matrix<s_t, Eigen::Dynamic, Eigen::Dynamic>(originalConstraints.size(), world->getNumDofs());
+  for (int k = 0; k < originalConstraints.size(); k += 3)
+  {
+    std::shared_ptr<DifferentiableContactConstraint> constraint
+        = originalConstraints[k];
+    // block of size 3 x numDofs starting at k, 0
+    contactNormalJacobians.block(k, 0, 3, world->getNumDofs()) = constraint->getContactForceDirectionJacobian(world);
+  }
+  return contactNormalJacobians;
+}
+
 
 //==============================================================================
 std::vector<std::shared_ptr<DifferentiableContactConstraint>>
