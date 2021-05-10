@@ -43,7 +43,9 @@ class NimbleGUI:
   def __init__(self, worldToCopy: nimble.simulation.World):
     self.world = worldToCopy.clone()
     self.guiServer = nimble.server.GUIWebsocketServer()
-    self.guiServer.renderWorld(self.world)
+    self.guiServer.renderWorld(self.world, renderForces=True)
+    # prefix, origin, euler
+    self.guiServer.renderBasis(10.,'', [0.,0.,0.], [0.,0.,0.])
     # Set up the realtime animation
     self.ticker = nimble.realtime.Ticker(self.world.getTimeStep() * 10)
     self.ticker.registerTickListener(self._onTick)
@@ -69,7 +71,7 @@ class NimbleGUI:
   def displayState(self, state: torch.Tensor):
     self.looping = False
     self.world.setState(state.detach().numpy())
-    self.guiServer.renderWorld(self.world)
+    self.guiServer.renderWorld(self.world, renderForces=True)
 
   def loopStates(self, states: List[torch.Tensor]):
     self.looping = True
@@ -101,7 +103,7 @@ class NimbleGUI:
     if self.looping:
       if self.i < np.shape(self.posMatrixToLoop)[1]:
         self.world.setPositions(self.posMatrixToLoop[:, self.i])
-        self.guiServer.renderWorld(self.world)
+        self.guiServer.renderWorld(self.world, renderForces=True)
         self.i += 1
       else:
         self.i = 0
