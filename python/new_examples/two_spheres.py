@@ -1,5 +1,6 @@
 
 import nimblephysics as nimble
+from nimblephysics.contacts import BackpropSnapshotPointer
 import torch
 import numpy as np
 import pdb
@@ -35,11 +36,10 @@ initialState[3:6] = [0.2, 0.0, 0.0]
 initialState[9:12] = [0.0, 0.0, 0.0]
 initialState = torch.tensor(initialState, requires_grad=True)
 
-ikMap = nimble.neural.IKMapping(world)
-ikMap.addLinearBodyNode(sphereA.getBodyNode(0))
 
 state = initialState
-contacts = nimble.contacts(world, state, torch.zeros(world.getActionSize()))
+backprop_snapshot_holder = BackpropSnapshotPointer()
+contacts = nimble.contacts(world, state, torch.zeros(world.getActionSize()), backprop_snapshot_holder)
 
 states = [state]
 results = []
@@ -64,10 +64,24 @@ for i in range(500):
     state = nimble.timestep(world, state.detach(), torch.zeros(world.getActionSize()))
 
   ## UPDATE BASED ON NORMAL
+  # walk through contacts, add normal loss for any that have children of the hand object
+  bodyNodesA = backprop_snapshot_holder.backprop_snapshot.getBodyNodesA()
+  bodyNodesB = backprop_snapshot_holder.backprop_snapshot.getBodyNodesB()
+
+  ikMap = nimble.neural.IKMapping(world)
+  normal_sign = torch.ones(normals.shape[0])
+  for j in range(normals.shape[0]):
+    bodyA = bodyNodesA[j] 
+    bodyB = bodyNodesB[j] 
+    if bodyA.descendsFrom(sphereANode):
+      ikMap.addLinearBodyNode(bodyA)
+      normal_sign[j] = -1
+    elif bodyA.descendsFrom(sphereANode):
+      ikMap.addLinearBodyNode(bodyB)
   state = torch.tensor(state, requires_grad=True)
   state.grad=None
   world_pos = nimble.map_to_pos(world, ikMap, state)
-  l = ((world_pos - (world_pos.detach() - normals[0,:].detach()))**2).sum()**(0.5)
+  l = ((world_pos - (world_pos.detach() - normals[:,:].detach()))**2).sum()**(0.5)
   l.backward()
   with torch.no_grad():
     next_action = torch.zeros(world.getActionSize())
@@ -88,7 +102,7 @@ for i in range(500):
 
   state = torch.tensor(state, requires_grad=True)
   state.grad = None
-  contacts = nimble.contacts(world, state, torch.zeros(world.getActionSize()))
+  contacts = nimble.contacts(world, state, torch.zeros(world.getActionSize()), backprop_snapshot_holder)
 
   states.append(state.detach().clone())
   results.append(world.getLastCollisionResult())
