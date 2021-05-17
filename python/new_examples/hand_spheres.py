@@ -14,6 +14,7 @@ world: nimble.simulation.World = nimble.simulation.World()
 world.setGravity([0, 0, 0.])
 
 hand: nimble.dynamics.Skeleton = world.loadSkeleton("/workspaces/nimblephysics/scratch/GraspIt2URDF/urdf/Barrett.urdf")
+hand.getBodyNode(0).setFrictionCoeff(0.1)
 
 sphereC = nimble.dynamics.Skeleton()
 sphereC.setName('sphereC')
@@ -23,6 +24,7 @@ sphereCShape.createCollisionAspect()
 sphereCVisual = sphereCShape.createVisualAspect()
 sphereCVisual.setRGBA([0.,0.,1.,1.])
 world.addSkeleton(sphereC)
+sphereC.getBodyNode(0).setFrictionCoeff(0.1)
 
 initialState = np.zeros(world.getStateSize())
 initialState = np.array([-6.15655259e-01, -6.15655291e-01,  1.48168677e+00,  5.65205104e-01,
@@ -65,7 +67,7 @@ contacts = nimble.contacts(world, state, torch.zeros(world.getActionSize()), bac
 states = [state]
 results = []
 results.append(world.getLastCollisionResult())
-for i in range(1000):
+for i in range(100):
   print(i)
   ## UPDATE BASED ON LOSS
   n_contacts = contacts.shape[0] // 6
@@ -74,16 +76,25 @@ for i in range(1000):
   positions = contacts[n_contacts*3:].reshape(-1,3)
   target_normals = torch.zeros_like(normals)
   target_normals[:,1] = 1.
-  l = (((normals-target_normals)**2).sum(axis=1)**(0.5)).sum()
+  l = (((normals-target_normals)**2).sum(axis=1)**(0.5))
   print(l)
-  l.backward()
-  print(world.getLastCollisionResult().getNumContacts())
+
+  grad_step = torch.zeros(n_contacts, world.getActionSize())
+  # 10000
+  learning_rate = 10000.
+  #learning_rate = 0.1
+  for j in range(n_contacts):
+    l[j].backward(retain_graph=True)
+    grad_step[j,:] = -state.grad[:14] * learning_rate
+    state.grad = None
+  #grad_step[:,:6] *= (1 / ((grad_step[:,6:]**2).sum(axis=1)**(0.5)).reshape(3,1)) * 0.000001
+  grad_step[:,:6] *= 0.
+  #grad_step[(0,1),:6] = 0.
+  #grad_step[(0,1),:3] = 0.
 
   with torch.no_grad():
-    learning_rate = 10000.0
     next_action = torch.zeros(world.getActionSize())
-    grad_step = -state.grad[:14] * learning_rate
-    next_action[:14] += grad_step
+    next_action[:14] += grad_step.sum(axis=0)
     #next_action[6:14] = torch.tensor([0., 1., 0.33333, 0., 1., 0.333333, 1., 0.333333])*1000
     #next_action[6:14] *= -1
 
@@ -110,11 +121,24 @@ for i in range(1000):
   state = torch.tensor(state, requires_grad=True)
   state.grad=None
   world_pos = nimble.map_to_pos(world, ikMap, state).reshape(-1,3)
-  l = (((world_pos - (world_pos.detach() - normals[:,:].detach()))**2).sum(axis=1)**(0.5)).sum()
-  l.backward()
+  l = (((world_pos - (world_pos.detach() - normals[:,:].detach()))**2).sum(axis=1)**(0.5))
+  normal_step = torch.zeros(n_contacts, world.getActionSize())
+  for j in range(n_contacts):
+    l[j].backward(retain_graph=True)
+    normal_step[j,:] = -state.grad[:14]
+    #normal_step[j,:6] = 0.
+    #grad_step[(0,1),:6] = 0.
+    #grad_step[(0,1),:3] = 0.
+    normal_step[j,:6] /= (normal_step[j,:6]**2).sum()**(0.5)
+    normal_step[j,:6] *= (grad_step[j,:6]**2).sum()**(0.5)
+    normal_step[j,6:] /= (normal_step[j,6:]**2).sum()**(0.5)
+    normal_step[j,6:] *= (grad_step[j,6:]**2).sum()**(0.5)
+    state.grad = None
+
   with torch.no_grad():
     next_action = torch.zeros(world.getActionSize())
-    next_action[:14] += - state.grad[:14] / ((state.grad[:14]**2).sum()**0.5) * (grad_step**2).sum()**(0.5)
+    next_action[:14] += normal_step.sum(axis=0)
+
     state = state.detach()
     state[-world.getActionSize():] = 0.
     state = nimble.timestep(world, state.detach(), next_action)
