@@ -8,6 +8,9 @@ import math
 from pyquaternion import Quaternion
 import transformations as trans
 import spin
+import cvxpy as cp
+from cvxpylayers.torch import CvxpyLayer
+
 
 # Load the world
 world: nimble.simulation.World = nimble.simulation.World()
@@ -67,7 +70,7 @@ contacts = nimble.contacts(world, state, torch.zeros(world.getActionSize()), bac
 states = [state]
 results = []
 results.append(world.getLastCollisionResult())
-for i in range(100):
+for i in range(1000):
   print(i)
   ## UPDATE BASED ON LOSS
   n_contacts = contacts.shape[0] // 6
@@ -79,22 +82,43 @@ for i in range(100):
   l = (((normals-target_normals)**2).sum(axis=1)**(0.5))
   print(l)
 
-  grad_step = torch.zeros(n_contacts, world.getActionSize())
+  grad_step = torch.zeros(n_contacts, world.getActionSize(), dtype=torch.float64)
   # 10000
-  learning_rate = 10000.
+  learning_rate = 1e4
   #learning_rate = 0.1
   for j in range(n_contacts):
     l[j].backward(retain_graph=True)
-    grad_step[j,:] = -state.grad[:14] * learning_rate
+    grad_step[j,:] = state.grad[:14]
     state.grad = None
-  #grad_step[:,:6] *= (1 / ((grad_step[:,6:]**2).sum(axis=1)**(0.5)).reshape(3,1)) * 0.000001
-  grad_step[:,:6] *= 0.
-  #grad_step[(0,1),:6] = 0.
-  #grad_step[(0,1),:3] = 0.
+
+  n,m = n_contacts*world.getActionSize(),1
+  x = cp.Variable(n)
+  A = cp.Parameter((m,n))
+  b = cp.Parameter(m)
+  constraints = [x >= -1, x <= 1]
+  objective = cp.Minimize(cp.pnorm(A @ x - b,p=1))
+  problem = cp.Problem(objective, constraints)
+  cvxpylayer = CvxpyLayer(problem, parameters=[A,b], variables=[x])
+  #A_tch = torch.randn(m, n, requires_grad=True)
+  A_tch = grad_step.reshape((m,n))
+  b_tch = torch.tensor([l.sum()])
+  # solve the problem
+  solution, = cvxpylayer(A_tch,b_tch)
+  grad_step = solution.reshape(n_contacts,-1) * learning_rate
+  #state.grad = None
+  #l2 = ((state[:14] - solution.detach())**2).sum()**(0.5)
+  #l2.backward()
+  #grad_step = -state.grad[:14] * learning_rate
+
+  #for j in range(n_contacts):
+    #l[j].backward(retain_graph=True)
+    #grad_step[j,:] = -state.grad[:14] * learning_rate
+    #state.grad = None
+  #grad_step[:,:6] *= 0.
 
   with torch.no_grad():
     next_action = torch.zeros(world.getActionSize())
-    next_action[:14] += grad_step.sum(axis=0)
+    next_action[:14] += -grad_step.sum(axis=0)#.sum(axis=0)
     #next_action[6:14] = torch.tensor([0., 1., 0.33333, 0., 1., 0.333333, 1., 0.333333])*1000
     #next_action[6:14] *= -1
 
@@ -105,6 +129,7 @@ for i in range(100):
 
   ## UPDATE BASED ON NORMAL
   # walk through contacts, add normal loss for any that have children of the hand object
+
   bodyNodesA = backprop_snapshot_holder.backprop_snapshot.getBodyNodesA()
   bodyNodesB = backprop_snapshot_holder.backprop_snapshot.getBodyNodesB()
 
@@ -129,10 +154,10 @@ for i in range(100):
     #normal_step[j,:6] = 0.
     #grad_step[(0,1),:6] = 0.
     #grad_step[(0,1),:3] = 0.
-    normal_step[j,:6] /= (normal_step[j,:6]**2).sum()**(0.5)
-    normal_step[j,:6] *= (grad_step[j,:6]**2).sum()**(0.5)
-    normal_step[j,6:] /= (normal_step[j,6:]**2).sum()**(0.5)
-    normal_step[j,6:] *= (grad_step[j,6:]**2).sum()**(0.5)
+    normal_step[j,:] /= (normal_step[j,:]**2).sum()**(0.5)
+    normal_step[j,:] *= (grad_step[j,:]**2).sum()**(0.5)
+    #normal_step[j,6:] /= (normal_step[:,6:]**2).sum()**(0.5)
+    #normal_step[j,6:] *= (grad_step[6:]**2).sum()**(0.5)
     state.grad = None
 
   with torch.no_grad():
